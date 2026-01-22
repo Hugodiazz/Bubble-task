@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -23,13 +25,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.devdiaz.orderless.data.model.Bubble
-import com.devdiaz.orderless.data.model.HabitBubble
 import com.devdiaz.orderless.data.model.TaskBubble
 import com.devdiaz.orderless.ui.components.BubbleActionMenu
 import com.devdiaz.orderless.ui.components.BubbleItemView
+import com.devdiaz.orderless.ui.components.CompletedHabitItem
 import com.devdiaz.orderless.ui.components.CreationDialog
-import com.devdiaz.orderless.ui.components.ExpandableFilterFab
-import com.devdiaz.orderless.viewmodel.BubbleFilter
+import com.devdiaz.orderless.ui.components.TopSectionNav
+import com.devdiaz.orderless.viewmodel.BubbleSection
+import com.devdiaz.orderless.viewmodel.BubbleStatus
 import com.devdiaz.orderless.viewmodel.BubbleViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -38,7 +41,9 @@ import kotlinx.coroutines.isActive
 fun BubbleScreen(viewModel: BubbleViewModel = viewModel()) {
         val tasks by viewModel.tasks.collectAsState()
         val habits by viewModel.habits.collectAsState()
-        val filter by viewModel.filter.collectAsState() // ACTIVE, HABITS, COMPLETED
+        val section by viewModel.section.collectAsState()
+        val status by viewModel.status.collectAsState()
+        val todayCompletions by viewModel.todayCompletions.collectAsState()
 
         var showCreationDialog by remember { mutableStateOf(false) }
         var selectedBubble by remember { mutableStateOf<Bubble?>(null) }
@@ -52,35 +57,64 @@ fun BubbleScreen(viewModel: BubbleViewModel = viewModel()) {
         }
 
         Box(
+                contentAlignment = Alignment.Center,
                 modifier =
                         Modifier.fillMaxSize()
                                 .background(Color(0xFF020617)) // Slate 950
                                 .onSizeChanged { size ->
                                         viewModel.updateCanvasSize(
-                                                size.width.toFloat(),
-                                                size.height.toFloat()
+                                                size.width.toFloat() - 200f,
+                                                size.height.toFloat() - 200f
                                         )
                                 }
         ) {
                 BackgroundDecoration()
 
+                // Top Nav
+                Box(modifier = Modifier.align(Alignment.TopCenter)) {
+                        TopSectionNav(
+                                section = section,
+                                status = status,
+                                onToggleStatus = {
+                                        viewModel.setStatus(
+                                                if (status == BubbleStatus.TASKS)
+                                                        BubbleStatus.COMPLETED
+                                                else BubbleStatus.TASKS
+                                        )
+                                }
+                        )
+                }
+
                 // Content Layer
                 Box(modifier = Modifier.fillMaxSize()) {
                         val visibleBubbles: List<Bubble> =
-                                when (filter) {
-                                        BubbleFilter.ACTIVE -> tasks.filter { !it.isCompleted }
-                                        BubbleFilter.HABITS ->
-                                                habits // Filter by day? React code does, but
-                                        // simplified here
-                                        BubbleFilter.COMPLETED ->
-                                                emptyList() // Render list separately
+                                if (status == BubbleStatus.TASKS) {
+                                        when (section) {
+                                                BubbleSection.ACTIVE ->
+                                                        tasks.filter { !it.isCompleted }
+                                                BubbleSection.HABITS ->
+                                                        habits.filter {
+                                                                !todayCompletions.contains(it.id)
+                                                        }
+                                        }
+                                } else {
+                                        emptyList()
                                 }
 
-                        if (filter != BubbleFilter.COMPLETED) {
+                        if (status == BubbleStatus.TASKS) {
                                 visibleBubbles.forEach { bubble ->
                                         key(bubble.id) {
                                                 DraggableBubble(
                                                         bubble = bubble,
+                                                        isCompletedToday =
+                                                                (bubble is TaskBubble &&
+                                                                        bubble.isCompleted) ||
+                                                                        (bubble is
+                                                                                com.devdiaz.orderless.data.model.HabitBubble &&
+                                                                                todayCompletions
+                                                                                        .contains(
+                                                                                                bubble.id
+                                                                                        )),
                                                         onDragStart = {
                                                                 viewModel.setDraggingId(bubble.id)
                                                         },
@@ -104,7 +138,13 @@ fun BubbleScreen(viewModel: BubbleViewModel = viewModel()) {
                                         }
                                 }
                         } else {
-                                val completedTasks = tasks.filter { it.isCompleted }
+                                // Completed List
+                                val completedItems =
+                                        if (section == BubbleSection.ACTIVE) {
+                                                tasks.filter { it.isCompleted }
+                                        } else {
+                                                habits.filter { todayCompletions.contains(it.id) }
+                                        }
 
                                 androidx.compose.foundation.lazy.LazyColumn(
                                         modifier =
@@ -116,17 +156,50 @@ fun BubbleScreen(viewModel: BubbleViewModel = viewModel()) {
                                         contentPadding = PaddingValues(horizontal = 24.dp),
                                         verticalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                        items(completedTasks.size) { index ->
-                                                val task = completedTasks[index]
-                                                CompletedTaskItem(
-                                                        task = task,
-                                                        onRestore = {
-                                                                viewModel.toggleTaskComplete(
-                                                                        task.id
-                                                                )
-                                                        },
-                                                        onDelete = { viewModel.deleteItem(task.id) }
-                                                )
+                                        if (section == BubbleSection.ACTIVE) {
+                                                val items = completedItems as List<TaskBubble>
+                                                items(items.size) { index ->
+                                                        val task = items[index]
+                                                        CompletedTaskItem(
+                                                                task = task,
+                                                                onRestore = {
+                                                                        viewModel
+                                                                                .toggleTaskComplete(
+                                                                                        task.id
+                                                                                )
+                                                                },
+                                                                onDelete = {
+                                                                        viewModel.deleteItem(
+                                                                                task.id
+                                                                        )
+                                                                }
+                                                        )
+                                                }
+                                        } else {
+                                                // Habits
+                                                val items =
+                                                        completedItems as
+                                                                List<
+                                                                        com.devdiaz.orderless.data.model.HabitBubble>
+                                                items(items.size) { index ->
+                                                        // Placeholder for completed habits if we
+                                                        // had them
+                                                        val habit = items[index]
+                                                        CompletedHabitItem(
+                                                                habit = habit,
+                                                                onRestore = {
+                                                                        viewModel
+                                                                                .toggleHabitComplete(
+                                                                                        habit.id
+                                                                                )
+                                                                },
+                                                                onDelete = {
+                                                                        viewModel.deleteItem(
+                                                                                habit.id
+                                                                        )
+                                                                }
+                                                        )
+                                                }
                                         }
                                 }
                         }
@@ -137,10 +210,29 @@ fun BubbleScreen(viewModel: BubbleViewModel = viewModel()) {
                         modifier = Modifier.align(Alignment.BottomEnd).padding(32.dp),
                         horizontalAlignment = Alignment.End
                 ) {
-                        ExpandableFilterFab(
-                                currentFilter = filter,
-                                onFilterSelected = { viewModel.setFilter(it) }
-                        )
+                        // Section Toggle FAB
+                        FloatingActionButton(
+                                onClick = {
+                                        viewModel.setSection(
+                                                if (section == BubbleSection.ACTIVE)
+                                                        BubbleSection.HABITS
+                                                else BubbleSection.ACTIVE
+                                        )
+                                },
+                                containerColor =
+                                        if (section == BubbleSection.ACTIVE) Color(0xFF3B82F6)
+                                        else Color(0xFF8B5CF6),
+                                contentColor = Color.White,
+                                shape = CircleShape,
+                                modifier = Modifier.size(56.dp)
+                        ) {
+                                Icon(
+                                        if (section == BubbleSection.ACTIVE) Icons.Default.Bolt
+                                        else Icons.Default.List,
+                                        contentDescription = "Switch Section",
+                                        modifier = Modifier.size(24.dp)
+                                )
+                        }
 
                         FloatingActionButton(
                                 onClick = { showCreationDialog = true },
@@ -160,11 +252,31 @@ fun BubbleScreen(viewModel: BubbleViewModel = viewModel()) {
                 if (showCreationDialog) {
                         CreationDialog(
                                 onDismiss = { showCreationDialog = false },
-                                onCreateTask = { text, priority, color ->
-                                        viewModel.addTask(text, priority, color)
+                                onCreateTask = {
+                                        text,
+                                        priority,
+                                        color,
+                                        dueDate,
+                                        reminderTime,
+                                        isReminderEnabled ->
+                                        viewModel.addTask(
+                                                text,
+                                                priority,
+                                                color,
+                                                dueDate,
+                                                reminderTime,
+                                                isReminderEnabled
+                                        )
                                 },
-                                onCreateHabit = { text, days, color ->
-                                        viewModel.addHabit(text, days, color)
+                                onCreateHabit = { text, days, color, reminderTime, isReminderEnabled
+                                        ->
+                                        viewModel.addHabit(
+                                                text,
+                                                days,
+                                                color,
+                                                reminderTime,
+                                                isReminderEnabled
+                                        )
                                 }
                         )
                 }
@@ -191,6 +303,7 @@ fun BubbleScreen(viewModel: BubbleViewModel = viewModel()) {
 @Composable
 fun DraggableBubble(
         bubble: Bubble,
+        isCompletedToday: Boolean,
         onDragStart: () -> Unit,
         onDragEnd: (vx: Float, vy: Float) -> Unit, // Returns velocity
         onDrag: (x: Float, y: Float) -> Unit,
@@ -241,9 +354,9 @@ fun DraggableBubble(
                 BubbleItemView(
                         onClick = onClick,
                         text = bubble.text,
-                        color = bubble.color,
+                        color = Color(bubble.color.toULong()),
                         size = bubble.size,
-                        isCompletedToday = (bubble is HabitBubble && bubble.completedToday)
+                        isCompletedToday = isCompletedToday
                 )
         }
 }
@@ -309,7 +422,10 @@ fun CompletedTaskItem(task: TaskBubble, onRestore: () -> Unit, onDelete: () -> U
                                 Box(
                                         modifier =
                                                 Modifier.size(12.dp)
-                                                        .background(task.color, CircleShape)
+                                                        .background(
+                                                                Color(task.color.toULong()),
+                                                                CircleShape
+                                                        )
                                 )
                                 Spacer(Modifier.width(16.dp))
                                 androidx.compose.material3.Text(

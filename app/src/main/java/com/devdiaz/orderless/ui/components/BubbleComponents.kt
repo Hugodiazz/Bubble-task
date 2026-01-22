@@ -10,12 +10,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SelectableDates
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,115 +34,124 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.devdiaz.orderless.data.model.BubbleColors
+import com.devdiaz.orderless.data.model.HabitBubble
 import com.devdiaz.orderless.data.model.Priority
-import com.devdiaz.orderless.viewmodel.BubbleFilter
+import com.devdiaz.orderless.viewmodel.BubbleSection
+import com.devdiaz.orderless.viewmodel.BubbleStatus
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Calendar
+import java.util.Locale
 
 @Composable
-fun ExpandableFilterFab(currentFilter: BubbleFilter, onFilterSelected: (BubbleFilter) -> Unit) {
-        var expanded by remember { mutableStateOf(false) }
-
-        Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(bottom = 16.dp)
+fun TopSectionNav(section: BubbleSection, status: BubbleStatus, onToggleStatus: () -> Unit) {
+        Box(
+                modifier =
+                        Modifier.fillMaxWidth()
+                                .padding(top = 48.dp) // Status bar pudding
+                                .wrapContentHeight(),
+                contentAlignment = Alignment.Center
         ) {
-                androidx.compose.animation.AnimatedVisibility(
-                        visible = expanded,
-                        enter =
-                                androidx.compose.animation.fadeIn() +
-                                        androidx.compose.animation.slideInVertically(
-                                                initialOffsetY = { it / 2 }
-                                        ),
-                        exit =
-                                androidx.compose.animation.fadeOut() +
-                                        androidx.compose.animation.slideOutVertically(
-                                                targetOffsetY = { it / 2 }
-                                        )
+                Button(
+                        onClick = onToggleStatus,
+                        colors =
+                                ButtonDefaults.buttonColors(
+                                        containerColor = Color.White.copy(alpha = 0.1f),
+                                        contentColor = Color.White
+                                ),
+                        shape = RoundedCornerShape(50),
+                        border =
+                                androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        Color.White.copy(alpha = 0.2f)
+                                ),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
                 ) {
-                        Column(
-                                horizontalAlignment = Alignment.End,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                                FilterOptionFab(
-                                        text = "Completadas",
-                                        icon = Icons.Default.CheckCircle,
-                                        isSelected = currentFilter == BubbleFilter.COMPLETED,
-                                        onClick = {
-                                                onFilterSelected(BubbleFilter.COMPLETED)
-                                                expanded = false
-                                        }
-                                )
-                                FilterOptionFab(
-                                        text = "Hábitos",
-                                        icon = Icons.Default.Bolt,
-                                        isSelected = currentFilter == BubbleFilter.HABITS,
-                                        onClick = {
-                                                onFilterSelected(BubbleFilter.HABITS)
-                                                expanded = false
-                                        }
-                                )
-                                FilterOptionFab(
-                                        text = "Tareas",
-                                        icon = Icons.AutoMirrored.Filled.List,
-                                        isSelected = currentFilter == BubbleFilter.ACTIVE,
-                                        onClick = {
-                                                onFilterSelected(BubbleFilter.ACTIVE)
-                                                expanded = false
-                                        }
-                                )
-                        }
-                }
-
-                SmallFloatingActionButton(
-                        onClick = { expanded = !expanded },
-                        containerColor = Color.White,
-                        contentColor = Color.Black,
-                        shape = CircleShape,
-                        modifier = Modifier.size(56.dp)
-                ) {
-                        Icon(
-                                if (expanded) Icons.Default.Close else Icons.Default.FilterList,
-                                contentDescription = "Filter",
-                                modifier = Modifier.size(24.dp)
+                        Text(
+                                text = "${section.label}  |  ${status.label}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                letterSpacing = 1.sp
                         )
                 }
         }
 }
 
 @Composable
-fun FilterOptionFab(
-        text: String,
-        icon: androidx.compose.ui.graphics.vector.ImageVector,
-        isSelected: Boolean,
-        onClick: () -> Unit
-) {
-        Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.End,
-                modifier = Modifier.clickable { onClick() }
+fun CompletedHabitItem(habit: HabitBubble, onRestore: () -> Unit, onDelete: () -> Unit) {
+        Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                border =
+                        androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                Color.White.copy(alpha = 0.1f)
+                        ),
+                shape = RoundedCornerShape(16.dp)
         ) {
-                Text(
-                        text = text,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        modifier =
-                                Modifier.background(
-                                                Color.Black.copy(alpha = 0.6f),
-                                                RoundedCornerShape(8.dp)
+                Row(
+                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                        Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                        ) {
+                                Box(
+                                        modifier =
+                                                Modifier.size(12.dp)
+                                                        .background(
+                                                                Color(habit.color.toULong()),
+                                                                CircleShape
+                                                        )
+                                )
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                        text = habit.text,
+                                        color = Color.White.copy(alpha = 0.4f),
+                                        style =
+                                                MaterialTheme.typography.bodyLarge.copy(
+                                                        textDecoration =
+                                                                androidx.compose.ui.text.style
+                                                                        .TextDecoration.LineThrough,
+                                                        fontWeight = FontWeight.Bold
+                                                )
+                                )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                IconButton(
+                                        onClick = onRestore,
+                                        modifier =
+                                                Modifier.background(
+                                                        Color.Transparent,
+                                                        RoundedCornerShape(12.dp)
+                                                )
+                                ) {
+                                        Icon(
+                                                Icons.Default.Refresh,
+                                                contentDescription = "Restore",
+                                                tint = Color.Green
                                         )
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-                Spacer(Modifier.width(12.dp))
-                SmallFloatingActionButton(
-                        onClick = onClick,
-                        containerColor =
-                                if (isSelected) Color(0xFF6366F1)
-                                else Color.White, // Indigo 500 if selected
-                        contentColor = if (isSelected) Color.White else Color.Black,
-                        shape = CircleShape,
-                        modifier = Modifier.size(48.dp)
-                ) { Icon(icon, contentDescription = text, modifier = Modifier.size(20.dp)) }
+                                }
+                                IconButton(
+                                        onClick = onDelete,
+                                        modifier =
+                                                Modifier.background(
+                                                        Color.Transparent,
+                                                        RoundedCornerShape(12.dp)
+                                                )
+                                ) {
+                                        Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "Delete",
+                                                tint = Color.Red
+                                        )
+                                }
+                        }
+                }
         }
 }
 
@@ -193,17 +207,113 @@ fun BubbleItemView(
         }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreationDialog(
         onDismiss: () -> Unit,
-        onCreateTask: (String, Priority, Color) -> Unit,
-        onCreateHabit: (String, List<Int>, Color) -> Unit
+        onCreateTask: (String, Priority, Color, Long?, String?, Boolean) -> Unit,
+        onCreateHabit: (String, List<Int>, Color, String?, Boolean) -> Unit
 ) {
         var itemType by remember { mutableStateOf("task") } // "task" or "habit"
         var inputValue by remember { mutableStateOf("") }
         var selectedPriority by remember { mutableStateOf(Priority.MEDIUM) }
-        var selectedColor by remember { mutableStateOf(BubbleColors.Blue400) }
+        var selectedColor by remember { mutableStateOf(Color(BubbleColors.Blue400.toInt())) }
         var selectedDays by remember { mutableStateOf((0..6).toList()) }
+
+        // Reminder State
+        var isReminderEnabled by remember { mutableStateOf(false) }
+
+        // Date & Time State
+        val calendar = Calendar.getInstance()
+        var selectedDateMillis by remember {
+                mutableStateOf(System.currentTimeMillis())
+        } // For DatePicker
+        var selectedHour by remember { mutableStateOf(calendar.get(Calendar.HOUR_OF_DAY)) }
+        var selectedMinute by remember { mutableStateOf(calendar.get(Calendar.MINUTE)) }
+
+        var showDatePicker by remember { mutableStateOf(false) }
+        var showTimePicker by remember { mutableStateOf(false) }
+
+        // Date Formatter
+        val dateFormatter = remember {
+                DateTimeFormatter.ofPattern("EEE, dd MMM", Locale("es", "ES"))
+        }
+
+        if (showDatePicker) {
+                val datePickerState =
+                        rememberDatePickerState(
+                                initialSelectedDateMillis = selectedDateMillis,
+                                selectableDates =
+                                        object : SelectableDates {
+                                                override fun isSelectableYear(year: Int): Boolean {
+                                                        return year >=
+                                                                Calendar.getInstance()
+                                                                        .get(Calendar.YEAR)
+                                                }
+                                        }
+                        )
+                DatePickerDialog(
+                        onDismissRequest = { showDatePicker = false },
+                        confirmButton = {
+                                TextButton(
+                                        onClick = {
+                                                datePickerState.selectedDateMillis?.let {
+                                                        selectedDateMillis =
+                                                                it + 43200000L // Add 12h to
+                                                        // handle timezone
+                                                        // offset safely
+                                                        // strictly for
+                                                        // day selection
+                                                }
+                                                showDatePicker = false
+                                        }
+                                ) { Text("OK") }
+                        },
+                        dismissButton = {
+                                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+                        }
+                ) { DatePicker(state = datePickerState) }
+        }
+
+        if (showTimePicker) {
+                val timePickerState =
+                        rememberTimePickerState(
+                                initialHour = selectedHour,
+                                initialMinute = selectedMinute,
+                                is24Hour = true
+                        )
+
+                Dialog(onDismissRequest = { showTimePicker = false }) {
+                        Card(
+                                colors =
+                                        CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                                shape = RoundedCornerShape(16.dp)
+                        ) {
+                                Column(
+                                        modifier = Modifier.padding(24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                        TimePicker(state = timePickerState)
+                                        Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.End
+                                        ) {
+                                                TextButton(onClick = { showTimePicker = false }) {
+                                                        Text("Cancel")
+                                                }
+                                                TextButton(
+                                                        onClick = {
+                                                                selectedHour = timePickerState.hour
+                                                                selectedMinute =
+                                                                        timePickerState.minute
+                                                                showTimePicker = false
+                                                        }
+                                                ) { Text("OK") }
+                                        }
+                                }
+                        }
+                }
+        }
 
         Dialog(
                 onDismissRequest = onDismiss,
@@ -443,7 +553,8 @@ fun CreationDialog(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                        BubbleColors.All.forEach { color ->
+                                        BubbleColors.All.forEach { longColor ->
+                                                val color = Color(longColor.toInt())
                                                 val isSelected = selectedColor == color
                                                 Box(
                                                         modifier =
@@ -471,23 +582,137 @@ fun CreationDialog(
                                         }
                                 }
 
+                                Spacer(Modifier.height(24.dp))
+
+                                // Reminder Section
+                                Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                ) {
+                                        Text(
+                                                "RECORDATORIO",
+                                                color = Color.White.copy(alpha = 0.3f),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                        )
+                                        Switch(
+                                                checked = isReminderEnabled,
+                                                onCheckedChange = { isReminderEnabled = it },
+                                                colors =
+                                                        SwitchDefaults.colors(
+                                                                checkedThumbColor = Color.White,
+                                                                checkedTrackColor =
+                                                                        Color(0xFF6366F1),
+                                                                uncheckedThumbColor =
+                                                                        Color.White.copy(
+                                                                                alpha = 0.6f
+                                                                        ),
+                                                                uncheckedTrackColor =
+                                                                        Color.White.copy(
+                                                                                alpha = 0.1f
+                                                                        )
+                                                        )
+                                        )
+                                }
+
+                                if (isReminderEnabled) {
+                                        Spacer(Modifier.height(16.dp))
+
+                                        Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                                // Date Picker (Only for Tasks)
+                                                if (itemType == "task") {
+                                                        Button(
+                                                                onClick = { showDatePicker = true },
+                                                                colors =
+                                                                        ButtonDefaults.buttonColors(
+                                                                                containerColor =
+                                                                                        Color.White
+                                                                                                .copy(
+                                                                                                        alpha =
+                                                                                                                0.05f
+                                                                                                ),
+                                                                                contentColor =
+                                                                                        Color.White
+                                                                        ),
+                                                                shape = RoundedCornerShape(12.dp),
+                                                                modifier = Modifier.weight(1f)
+                                                        ) {
+                                                                val date =
+                                                                        Instant.ofEpochMilli(
+                                                                                        selectedDateMillis
+                                                                                )
+                                                                                .atZone(
+                                                                                        ZoneId.systemDefault()
+                                                                                )
+                                                                                .toLocalDate()
+                                                                Text(date.format(dateFormatter))
+                                                        }
+                                                }
+
+                                                // Time Picker
+                                                Button(
+                                                        onClick = { showTimePicker = true },
+                                                        colors =
+                                                                ButtonDefaults.buttonColors(
+                                                                        containerColor =
+                                                                                Color.White.copy(
+                                                                                        alpha =
+                                                                                                0.05f
+                                                                                ),
+                                                                        contentColor = Color.White
+                                                                ),
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        modifier = Modifier.weight(1f)
+                                                ) {
+                                                        Text(
+                                                                String.format(
+                                                                        "%02d:%02d",
+                                                                        selectedHour,
+                                                                        selectedMinute
+                                                                )
+                                                        )
+                                                }
+                                        }
+                                }
+
                                 Spacer(Modifier.height(32.dp))
 
                                 // Submit Button
                                 Button(
                                         onClick = {
                                                 if (inputValue.isNotBlank()) {
+                                                        val timeString =
+                                                                String.format(
+                                                                        "%02d:%02d",
+                                                                        selectedHour,
+                                                                        selectedMinute
+                                                                )
                                                         if (itemType == "task") {
                                                                 onCreateTask(
                                                                         inputValue,
                                                                         selectedPriority,
-                                                                        selectedColor
+                                                                        selectedColor,
+                                                                        if (isReminderEnabled)
+                                                                                selectedDateMillis
+                                                                        else null,
+                                                                        if (isReminderEnabled)
+                                                                                timeString
+                                                                        else null,
+                                                                        isReminderEnabled
                                                                 )
                                                         } else {
                                                                 onCreateHabit(
                                                                         inputValue,
                                                                         selectedDays,
-                                                                        selectedColor
+                                                                        selectedColor,
+                                                                        if (isReminderEnabled)
+                                                                                timeString
+                                                                        else null,
+                                                                        isReminderEnabled
                                                                 )
                                                         }
                                                         onDismiss() // Dialog closes after creating

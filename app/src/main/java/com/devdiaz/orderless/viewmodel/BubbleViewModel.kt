@@ -2,16 +2,28 @@ package com.devdiaz.orderless.viewmodel
 
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.devdiaz.orderless.BubbleApplication
 import com.devdiaz.orderless.data.model.*
+import com.devdiaz.orderless.data.repository.BubbleRepository
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlin.math.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class BubbleViewModel : ViewModel() {
+class BubbleViewModel(private val repository: BubbleRepository) : ViewModel() {
 
     private val _tasks = MutableStateFlow<List<TaskBubble>>(emptyList())
     val tasks: StateFlow<List<TaskBubble>> = _tasks.asStateFlow()
@@ -19,8 +31,25 @@ class BubbleViewModel : ViewModel() {
     private val _habits = MutableStateFlow<List<HabitBubble>>(emptyList())
     val habits: StateFlow<List<HabitBubble>> = _habits.asStateFlow()
 
-    private val _filter = MutableStateFlow(BubbleFilter.ACTIVE)
-    val filter: StateFlow<BubbleFilter> = _filter.asStateFlow()
+    private val _todayCompletions = MutableStateFlow<Set<String>>(emptySet())
+    val todayCompletions: StateFlow<Set<String>> = _todayCompletions.asStateFlow()
+
+    private val _section = MutableStateFlow(BubbleSection.ACTIVE)
+    val section: StateFlow<BubbleSection> = _section.asStateFlow()
+
+    private val _status = MutableStateFlow(BubbleStatus.TASKS)
+    val status: StateFlow<BubbleStatus> = _status.asStateFlow()
+
+    // Date Reactivity
+    private val _currentDate = MutableStateFlow(getTodayDate())
+    // Trigger updates every minute to check for date change
+    private val _timer =
+            kotlinx.coroutines.flow.flow {
+                while (true) {
+                    emit(Unit)
+                    kotlinx.coroutines.delay(60_000)
+                }
+            }
 
     private var draggingId: String? = null
 
@@ -29,73 +58,90 @@ class BubbleViewModel : ViewModel() {
     private var canvasHeight = 1000f
 
     init {
-        // Initial example data
+        // Collect Tasks from DB
         viewModelScope.launch {
-            _tasks.value =
-                    listOf(
-                            TaskBubble(
-                                    id = "t1",
-                                    text = "Comprar café",
-                                    color = BubbleColors.Green400,
-                                    x = 300f,
-                                    y = 400f,
-                                    vx = 0.5f,
-                                    vy = 0.5f,
-                                    radius = 50f,
-                                    size = 100f,
-                                    priority = Priority.MEDIUM
-                            ),
-                            TaskBubble(
-                                    id = "t2",
-                                    text = "Hacer ejercicio",
-                                    color = BubbleColors.Blue400,
-                                    x = 600f,
-                                    y = 500f,
-                                    vx = -0.5f,
-                                    vy = 0.5f,
-                                    radius = 80f,
-                                    size = 160f,
-                                    priority = Priority.HIGH
+            repository.allTasks.collect { dbTasks ->
+                _tasks.update { currentTasks ->
+                    // Merge DB data with local physics state
+                    dbTasks.map { dbTask ->
+                        val localTask = currentTasks.find { it.id == dbTask.id }
+                        if (localTask != null) {
+                            dbTask.copy(
+                                    x = localTask.x,
+                                    y = localTask.y,
+                                    vx = localTask.vx,
+                                    vy = localTask.vy
                             )
-                    )
+                        } else {
+                            dbTask.copy(
+                                    x = if (dbTask.x == 0f) canvasWidth / 2 else dbTask.x,
+                                    y = if (dbTask.y == 0f) canvasHeight / 2 else dbTask.y
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
-            _habits.value =
-                    listOf(
-                            HabitBubble(
-                                    id = "h1",
-                                    text = "Beber Agua",
-                                    color = BubbleColors.Blue400,
-                                    x = 300f,
-                                    y = 400f,
-                                    vx = 0.5f,
-                                    vy = -0.5f,
-                                    radius = 45f,
-                                    size = 90f,
-                                    days = listOf(0, 1, 2, 3, 4, 5, 6)
-                            ),
-                            HabitBubble(
-                                    id = "h2",
-                                    text = "Meditar",
-                                    color = BubbleColors.Purple400,
-                                    x = 500f,
-                                    y = 500f,
-                                    vx = -0.5f,
-                                    vy = 0.5f,
-                                    radius = 45f,
-                                    size = 90f,
-                                    days = listOf(1, 2, 3, 4, 5)
-                            )
-                    )
+        // Monitor Date Changes
+        viewModelScope.launch {
+            _timer.collect {
+                val newDate = getTodayDate()
+                if (_currentDate.value != newDate) {
+                    _currentDate.value = newDate
+                }
+            }
+        }
+
+        // Collect Habits from DB with Date Reactivity
+        viewModelScope.launch {
+            combine(repository.allHabits, _currentDate) { dbHabits, _ ->
+                val todayIndex = getCurrentDayOfWeek()
+                dbHabits.filter { it.days.contains(todayIndex) }
+            }
+                    .collect { visibleHabits ->
+                        _habits.update { currentHabits ->
+                            visibleHabits.map { dbHabit ->
+                                val localHabit = currentHabits.find { it.id == dbHabit.id }
+                                if (localHabit != null) {
+                                    dbHabit.copy(
+                                            x = localHabit.x,
+                                            y = localHabit.y,
+                                            vx = localHabit.vx,
+                                            vy = localHabit.vy
+                                    )
+                                } else {
+                                    dbHabit.copy(
+                                            x = if (dbHabit.x == 0f) canvasWidth / 2 else dbHabit.x,
+                                            y = if (dbHabit.y == 0f) canvasHeight / 2 else dbHabit.y
+                                    )
+                                }
+                            }
+                        }
+                    }
+        }
+
+        // Collect Today's Completions with Date Reactivity
+        viewModelScope.launch {
+            _currentDate.flatMapLatest { date -> repository.getCompletionsForDate(date) }.collect {
+                    completions ->
+                _todayCompletions.value = completions.map { it.habitBubbleId }.toSet()
+            }
         }
     }
+    // Initial example data
 
     fun updateCanvasSize(width: Float, height: Float) {
         canvasWidth = width
         canvasHeight = height
     }
 
-    fun setFilter(newFilter: BubbleFilter) {
-        _filter.value = newFilter
+    fun setSection(newSection: BubbleSection) {
+        _section.value = newSection
+    }
+
+    fun setStatus(newStatus: BubbleStatus) {
+        _status.value = newStatus
     }
 
     fun setDraggingId(id: String?) {
@@ -105,9 +151,10 @@ class BubbleViewModel : ViewModel() {
     // Physics Engine
     fun updatePhysics() {
         _tasks.update { currentTasks ->
-            updateBubblePhysics(currentTasks, false) as List<TaskBubble>
+            @Suppress("UNCHECKED_CAST") updateBubblePhysics(currentTasks, false) as List<TaskBubble>
         }
         _habits.update { currentHabits ->
+            @Suppress("UNCHECKED_CAST")
             updateBubblePhysics(currentHabits, true) as List<HabitBubble>
         }
     }
@@ -241,7 +288,14 @@ class BubbleViewModel : ViewModel() {
         }
     }
 
-    fun addTask(text: String, priority: Priority, color: Color) {
+    fun addTask(
+            text: String,
+            priority: Priority,
+            color: Color,
+            dueDate: Long?,
+            reminderTime: String?,
+            isReminderEnabled: Boolean
+    ) {
         val size = priority.size
         val newTask =
                 TaskBubble(
@@ -249,17 +303,26 @@ class BubbleViewModel : ViewModel() {
                         text = text,
                         size = size,
                         radius = size / 2,
-                        color = color,
+                        color = color.value.toLong(),
                         x = canvasWidth / 2,
                         y = canvasHeight / 2, // Start at center
                         vx = (Math.random().toFloat() - 0.5f) * 2f, // Slightly fasted launch
                         vy = (Math.random().toFloat() - 0.5f) * 2f,
-                        priority = priority
+                        priority = priority,
+                        reminderTime = reminderTime,
+                        notificationId = System.currentTimeMillis().toInt(),
+                        isReminderEnabled = isReminderEnabled
                 )
-        _tasks.update { it + newTask }
+        viewModelScope.launch { repository.insertTask(newTask) }
     }
 
-    fun addHabit(text: String, days: List<Int>, color: Color) {
+    fun addHabit(
+            text: String,
+            days: List<Int>,
+            color: Color,
+            reminderTime: String?,
+            isReminderEnabled: Boolean
+    ) {
         val size = 90f // Reduced from original
         val newHabit =
                 HabitBubble(
@@ -267,33 +330,60 @@ class BubbleViewModel : ViewModel() {
                         text = text,
                         size = size,
                         radius = size / 2,
-                        color = color,
+                        color = color.value.toLong(),
                         x = canvasWidth / 2,
                         y = canvasHeight / 2,
                         vx = (Math.random().toFloat() - 0.5f) * 1f,
                         vy = (Math.random().toFloat() - 0.5f) * 1f,
-                        days = days
+                        days = days,
+                        reminderTime = reminderTime,
+                        notificationId = System.currentTimeMillis().toInt(),
+                        isReminderEnabled = isReminderEnabled
                 )
-        _habits.update { it + newHabit }
+        viewModelScope.launch { repository.insertHabit(newHabit) }
     }
 
     fun toggleTaskComplete(id: String) {
-        _tasks.update { list ->
-            list.map { if (it.id == id) it.copy(isCompleted = !it.isCompleted) else it }
+        val task = _tasks.value.find { it.id == id }
+        if (task != null) {
+            val updatedTask = task.copy(isCompleted = !task.isCompleted)
+            viewModelScope.launch { repository.updateTask(updatedTask) }
         }
     }
 
     fun toggleHabitComplete(id: String) {
-        _habits.update { list ->
-            list.map { if (it.id == id) it.copy(completedToday = !it.completedToday) else it }
+        val today = getTodayDate()
+        viewModelScope.launch {
+            val existing = repository.getCompletion(id, today)
+            if (existing != null) {
+                repository.deleteCompletion(existing)
+            } else {
+                repository.insertCompletion(HabitCompletion(habitBubbleId = id, date = today))
+            }
         }
     }
 
+    private fun getTodayDate(): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        return sdf.format(Date())
+    }
+
+    private fun getCurrentDayOfWeek(): Int {
+        val calendar = Calendar.getInstance()
+        // Calendar.SUNDAY is 1, Monday is 2, etc.
+        // We want 0 = Sunday, 1 = Monday.
+        return calendar.get(Calendar.DAY_OF_WEEK) - 1
+    }
+
     fun deleteItem(id: String) {
-        if (id.startsWith("t")) {
-            _tasks.update { it.filter { t -> t.id != id } }
-        } else {
-            _habits.update { it.filter { h -> h.id != id } }
+        viewModelScope.launch {
+            if (id.startsWith("t")) {
+                val task = _tasks.value.find { it.id == id }
+                if (task != null) repository.deleteTask(task)
+            } else {
+                val habit = _habits.value.find { it.id == id }
+                if (habit != null) repository.deleteHabit(habit)
+            }
         }
     }
 
@@ -310,10 +400,23 @@ class BubbleViewModel : ViewModel() {
         _tasks.update { list -> list.map { if (it.id == id) it.copy(vx = vx, vy = vy) else it } }
         _habits.update { list -> list.map { if (it.id == id) it.copy(vx = vx, vy = vy) else it } }
     }
+
+    companion object {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val app = (this[APPLICATION_KEY] as BubbleApplication)
+                BubbleViewModel(app.repository)
+            }
+        }
+    }
 }
 
-enum class BubbleFilter {
-    ACTIVE,
-    HABITS,
-    COMPLETED
+enum class BubbleSection(val label: String) {
+    ACTIVE("Tareas"),
+    HABITS("Hábitos")
+}
+
+enum class BubbleStatus(val label: String) {
+    TASKS("Pendientes"),
+    COMPLETED("Completado")
 }

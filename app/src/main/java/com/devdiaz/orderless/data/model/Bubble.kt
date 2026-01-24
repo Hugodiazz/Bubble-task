@@ -37,6 +37,7 @@ data class TaskBubble(
         var isCompleted: Boolean = false,
         val createdAt: Long = System.currentTimeMillis(),
         val completedAt: Long? = null,
+        val dueDate: Long? = null,
         val reminderTime: String?, // Formato "HH:mm"
         val notificationId: Int, // Un ID único para gestionar/cancelar la alarma
         val isReminderEnabled: Boolean = false

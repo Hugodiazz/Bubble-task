@@ -9,7 +9,7 @@ import com.devdiaz.orderless.data.model.TaskBubble
 
 @Database(
         entities = [TaskBubble::class, HabitBubble::class, HabitCompletion::class],
-        version = 1,
+        version = 2,
         exportSchema = false
 )
 @TypeConverters(Converters::class)

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.devdiaz.orderless.BubbleApplication
 import com.devdiaz.orderless.data.model.*
 import com.devdiaz.orderless.data.repository.BubbleRepository
+import com.devdiaz.orderless.util.AlarmScheduler
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -23,7 +24,10 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class BubbleViewModel(private val repository: BubbleRepository) : ViewModel() {
+class BubbleViewModel(
+        private val repository: BubbleRepository,
+        private val alarmScheduler: AlarmScheduler
+) : ViewModel() {
 
     private val _tasks = MutableStateFlow<List<TaskBubble>>(emptyList())
     val tasks: StateFlow<List<TaskBubble>> = _tasks.asStateFlow()
@@ -309,11 +313,13 @@ class BubbleViewModel(private val repository: BubbleRepository) : ViewModel() {
                         vx = (Math.random().toFloat() - 0.5f) * 2f, // Slightly fasted launch
                         vy = (Math.random().toFloat() - 0.5f) * 2f,
                         priority = priority,
+                        dueDate = dueDate,
                         reminderTime = reminderTime,
                         notificationId = System.currentTimeMillis().toInt(),
                         isReminderEnabled = isReminderEnabled
                 )
         viewModelScope.launch { repository.insertTask(newTask) }
+        alarmScheduler.schedule(newTask)
     }
 
     fun addHabit(
@@ -341,6 +347,7 @@ class BubbleViewModel(private val repository: BubbleRepository) : ViewModel() {
                         isReminderEnabled = isReminderEnabled
                 )
         viewModelScope.launch { repository.insertHabit(newHabit) }
+        alarmScheduler.schedule(newHabit)
     }
 
     fun toggleTaskComplete(id: String) {
@@ -379,10 +386,16 @@ class BubbleViewModel(private val repository: BubbleRepository) : ViewModel() {
         viewModelScope.launch {
             if (id.startsWith("t")) {
                 val task = _tasks.value.find { it.id == id }
-                if (task != null) repository.deleteTask(task)
+                if (task != null) {
+                    repository.deleteTask(task)
+                    alarmScheduler.cancel(task)
+                }
             } else {
                 val habit = _habits.value.find { it.id == id }
-                if (habit != null) repository.deleteHabit(habit)
+                if (habit != null) {
+                    repository.deleteHabit(habit)
+                    alarmScheduler.cancel(habit)
+                }
             }
         }
     }
@@ -405,7 +418,7 @@ class BubbleViewModel(private val repository: BubbleRepository) : ViewModel() {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = (this[APPLICATION_KEY] as BubbleApplication)
-                BubbleViewModel(app.repository)
+                BubbleViewModel(app.repository, AlarmScheduler(app))
             }
         }
     }

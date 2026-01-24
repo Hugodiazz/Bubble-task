@@ -12,4 +12,23 @@ class BubbleApplication : Application() {
     }
 
     val repository by lazy { BubbleRepository(database.bubbleDao()) }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
+    private fun createNotificationChannel() {
+        val name = "PopTasks Reminders"
+        val descriptionText = "Notifications for PopTasks and Habits"
+        val importance = android.app.NotificationManager.IMPORTANCE_HIGH
+        val channel =
+                android.app.NotificationChannel("poptasks_reminders", name, importance).apply {
+                    description = descriptionText
+                }
+        val notificationManager: android.app.NotificationManager =
+                getSystemService(NOTIFICATION_SERVICE) as
+                        android.app.NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
 }
